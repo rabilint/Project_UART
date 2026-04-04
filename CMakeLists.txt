@@ -32,7 +32,11 @@ message("Build type: " ${CMAKE_BUILD_TYPE})
 enable_language(C ASM)
 
 # Create an executable object type
-add_executable(${CMAKE_PROJECT_NAME})
+add_executable(${CMAKE_PROJECT_NAME}
+        Core/Src/u8g2_stm32_hal.c
+        Core/Src/OLED_animations.c
+        Core/Inc/OLED_animations.h
+)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -41,14 +45,19 @@ add_subdirectory(cmake/stm32cubemx)
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
+file(GLOB_RECURSE U8G2_SOURCES "Drivers/u8g2/Src/*.c")
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+        ${U8G2_SOURCES}
     # Add user sources here
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+        Core/Inc
+        Drivers/u8g2/Inc
+
     # Add user defined include paths
 )
 

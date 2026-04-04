@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "u8g2.h"
+#include "OLED_animations.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,7 +50,7 @@ UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
-
+u8g2_t u8g2;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,12 +62,18 @@ static void MX_USART1_UART_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
-
+uint8_t u8x8_byte_stm32_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr);
+uint8_t u8x8_gpio_and_delay_stm32(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 uint8_t button_locked = 0;
+int8_t heart_scale = 2;
+
+uint32_t last_oled_tick = 0;
+uint32_t last_led_tick = 0;
+uint32_t red_pwm_val = 0;
 /* USER CODE END 0 */
 
 /**
@@ -109,6 +116,18 @@ int main(void)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3); // Green
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4); // Blue
 
+
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_RESET);
+  HAL_Delay(100);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_SET);
+  HAL_Delay(100);
+
+  u8g2_Setup_ssd1306_128x64_noname_f(&u8g2, U8G2_R0, u8x8_byte_stm32_hw_spi, u8x8_gpio_and_delay_stm32);
+  u8g2_InitDisplay(&u8g2);
+  u8g2_SetPowerSave(&u8g2, 0);
+
+  HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET); // GREEN = 0
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -119,18 +138,35 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-    // Перемикаємо ваші звичайні світлодіоди за допомогою створених вами міток
-    // HAL_GPIO_TogglePin(RED_LED_GPIO_Port, RED_LED_Pin);
-    // HAL_Delay(500);
-    // HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
+    uint32_t current_tick = HAL_GetTick();
+    if (current_tick - last_oled_tick >= 500)
+    {
+      u8g2_ClearBuffer(&u8g2);
+      last_oled_tick = current_tick;
 
-    // Плавно запалюємо червоний канал RGB діода
-    for(uint16_t i = 0; i < 65535; i += 500) {
-      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, i);
-      HAL_Delay(5);
+      u8g2_SetFont(&u8g2, u8g2_font_ncenB08_tr);
+      u8g2_DrawStr(&u8g2, 2, 12, "STM32F401CCU6!");
+      u8g2_DrawLine(&u8g2, 0, 15, 128, 15); // Горизонтальна лінія)
+      u8g2_DrawLine(&u8g2, 0, 16, 128, 16); // Горизонтальна лінія)
+      u8g2_DrawFrame(&u8g2, 0, 0, 128, 64); // Рамка по периметру
+
+      drawScaledHeart(&u8g2, (128/2) - 7 * heart_scale , 20, heart_scale);
+      heart_scale = heart_scale == 2 ? 3 : 2;
+
+      u8g2_SendBuffer(&u8g2);
     }
-    // Гасимо червоний канал
-    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+
+    if (current_tick - last_led_tick >= 5)
+    {
+      last_led_tick = current_tick;
+      red_pwm_val += 500;
+      if (red_pwm_val >= 65535)
+      {
+        red_pwm_val = 0;
+      }
+      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, red_pwm_val);
+
+    }
 
   }
   /* USER CODE END 3 */
@@ -200,7 +236,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
