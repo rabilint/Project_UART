@@ -33,9 +33,6 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
-        Core/Src/u8g2_stm32_hal.c
-        Core/Src/OLED_animations.c
-        Core/Inc/OLED_animations.h
 )
 
 # Add STM32CubeMX generated sources
@@ -49,6 +46,9 @@ file(GLOB_RECURSE U8G2_SOURCES "Drivers/u8g2/Src/*.c")
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+        Core/Src/u8g2_stm32_hal.c
+        Core/Src/OLED_animations.c
+        Drivers/BMP180/Src/bmp180.c
         ${U8G2_SOURCES}
     # Add user sources here
 )
@@ -57,6 +57,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         Core/Inc
         Drivers/u8g2/Inc
+        Drivers/BMP180/Inc
 
     # Add user defined include paths
 )

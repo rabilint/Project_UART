@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "u8g2.h"
 #include "OLED_animations.h"
+#include "bmp180.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,6 +42,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+I2C_HandleTypeDef hi2c1;
+
 SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim3;
@@ -51,6 +54,7 @@ DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
 u8g2_t u8g2;
+BMP180_t bmp180;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,6 +65,7 @@ static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 uint8_t u8x8_byte_stm32_hw_spi(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr);
 uint8_t u8x8_gpio_and_delay_stm32(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr);
@@ -70,7 +75,7 @@ uint8_t u8x8_gpio_and_delay_stm32(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, vo
 /* USER CODE BEGIN 0 */
 uint8_t button_locked = 0;
 int8_t heart_scale = 2;
-
+unsigned int what_to_draw = 0;
 uint32_t last_oled_tick = 0;
 uint32_t last_led_tick = 0;
 uint32_t red_pwm_val = 0;
@@ -110,11 +115,17 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1); // Red
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3); // Green
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4); // Blue
+
+  if (BMP180_Init(&bmp180, &hi2c1, 101600) != 0)
+  {
+    Error_Handler();
+  }
 
 
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, GPIO_PIN_RESET);
@@ -149,10 +160,14 @@ int main(void)
       u8g2_DrawLine(&u8g2, 0, 15, 128, 15); // Горизонтальна лінія)
       u8g2_DrawLine(&u8g2, 0, 16, 128, 16); // Горизонтальна лінія)
       u8g2_DrawFrame(&u8g2, 0, 0, 128, 64); // Рамка по периметру
-
-      drawScaledHeart(&u8g2, (128/2) - 7 * heart_scale , 20, heart_scale);
-      heart_scale = heart_scale == 2 ? 3 : 2;
-
+      if (what_to_draw == 0)
+      {
+        drawTP(&u8g2, 2, 28, 2, 40,2,52, &bmp180);
+      }else if (what_to_draw == 1)
+      {
+        drawScaledHeart(&u8g2, (128/2) - 7 * heart_scale , 20, heart_scale);
+        heart_scale = heart_scale == 2 ? 3 : 2;
+      }
       u8g2_SendBuffer(&u8g2);
     }
 
@@ -211,6 +226,40 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
 }
 
 /**
@@ -471,6 +520,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   {
     button_locked = 1;
     HAL_TIM_Base_Start_IT(&htim4);
+    what_to_draw = what_to_draw == 0 ? 1 : 0;
 
     HAL_GPIO_TogglePin(RED_LED_GPIO_Port, RED_LED_Pin);
     HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
