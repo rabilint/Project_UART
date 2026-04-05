@@ -40,7 +40,7 @@ void drawTP(u8g2_t *u8g2, int x, int y, int x2, int y2, int x3, int y3, BMP180_t
     char buffer[32];
     int temp_int = (int)dev->temperature;
     int temp_frac = (int)((dev->temperature - temp_int) * 10);
-    int ret = snprintf(buffer, sizeof buffer, "Tmp: %d.%d C", temp_int, temp_frac);
+    int ret = snprintf(buffer, sizeof buffer, "Tmp: %d.%d °C", temp_int, temp_frac);
     if (ret < 0 || ret >= sizeof buffer)
     {
         return;
@@ -48,7 +48,7 @@ void drawTP(u8g2_t *u8g2, int x, int y, int x2, int y2, int x3, int y3, BMP180_t
 
     u8g2_DrawStr(u8g2, x, y,  buffer);
     uint32_t mm_Hg = dev->pressure * 0.00750062;
-    ret = snprintf(buffer, sizeof buffer, "mm Hg: %ld", mm_Hg);
+    ret = snprintf(buffer, sizeof buffer, "mm Hg: %ld hPa", mm_Hg);
     if (ret < 0 || ret >= sizeof buffer)
     {
         return;

@@ -21,6 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <string.h>
+
 #include "u8g2.h"
 #include "OLED_animations.h"
 #include "bmp180.h"
@@ -55,6 +58,8 @@ DMA_HandleTypeDef hdma_usart1_rx;
 /* USER CODE BEGIN PV */
 u8g2_t u8g2;
 BMP180_t bmp180;
+
+char rx_data[32];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,10 +80,19 @@ uint8_t u8x8_gpio_and_delay_stm32(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, vo
 /* USER CODE BEGIN 0 */
 uint8_t button_locked = 0;
 int8_t heart_scale = 2;
-unsigned int what_to_draw = 0;
+int8_t what_to_draw = 1;
 uint32_t last_oled_tick = 0;
 uint32_t last_led_tick = 0;
 uint32_t red_pwm_val = 0;
+uint32_t green_pwm_val = 0;
+uint32_t blue_pwm_val = 0;
+
+
+uint8_t last_rx_byte = 0;
+uint16_t last_rx_size = 0;
+
+char custom_text[32] = "STM32F401CCU6!";
+int color = 0; /// R = 0; G = 1; B = 2
 /* USER CODE END 0 */
 
 /**
@@ -137,7 +151,7 @@ int main(void)
   u8g2_InitDisplay(&u8g2);
   u8g2_SetPowerSave(&u8g2, 0);
 
-  HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET); // GREEN = 0
+  HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, GPIO_PIN_SET); // GREEN = 1
 
   /* USER CODE END 2 */
 
@@ -149,6 +163,94 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+    if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE) != RESET)
+    {
+      uint8_t cmd;
+      if (HAL_UART_Receive(&huart1, &cmd, 1, 10) == HAL_OK)
+      {
+        last_rx_byte = cmd; // Зберігаємо для відображення на екрані
+
+        // Парсинг команд
+        if (cmd == 'H') {
+          what_to_draw = 1;
+          HAL_GPIO_TogglePin(RED_LED_GPIO_Port, RED_LED_Pin);
+          HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
+        }
+        else if (cmd == 'S') {
+          what_to_draw = 0;
+          HAL_GPIO_TogglePin(RED_LED_GPIO_Port, RED_LED_Pin);
+          HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
+        }
+        else if (cmd == 'G')
+        {
+          BMP180_Read(&bmp180,3);
+          char buffer[32];
+          char error[] = "Error";
+          int temp_int = (int)bmp180.temperature;
+          int temp_frac = (int)((bmp180.temperature - temp_int) * 10);
+          uint32_t mm_Hg = (uint32_t)(bmp180.pressure * 0.00750062);
+
+          int ret = snprintf(buffer, sizeof buffer, "T;%d.%d;P#%lu#\n", temp_int, temp_frac, mm_Hg);
+          if (ret < 0 || ret >= sizeof buffer)
+          {
+            HAL_UART_Transmit(&huart1, (uint8_t *)error, sizeof error, 100);
+          }
+          else
+          {
+            HAL_UART_Transmit(&huart1, (uint8_t *)buffer, sizeof buffer, 100);
+          }
+        }
+        else if (cmd == 'C')
+        {
+          memset(custom_text, 0, sizeof(custom_text));
+          uint8_t idx = 0;
+          uint32_t start_time = HAL_GetTick();
+          while (idx < 31 && (HAL_GetTick() - start_time < 100))
+          {
+            if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_RXNE) != RESET)
+            {
+              uint8_t ch;
+              HAL_UART_Receive(&huart1, &ch, 1, 10);
+
+              if (ch == '\n') break;
+              custom_text[idx++] = ch;
+            }
+          }
+
+          u8g2_SetFont(&u8g2, u8g2_font_ncenB08_tr);
+          uint16_t text_width = u8g2_GetStrWidth(&u8g2, custom_text);
+
+          if (text_width > 124) {
+            uint8_t error_msg = 'E';
+            HAL_UART_Transmit(&huart1, &error_msg, 1, 10);
+
+            memset(custom_text, 0, sizeof(custom_text));
+            strcpy(custom_text, "Error: Too long!");
+          } else {
+            uint8_t ok_msg = 'K';
+            HAL_UART_Transmit(&huart1, &ok_msg, 1, 10);
+          }
+        } else if (cmd == 'R') // Red
+        {
+          color = 0;
+          green_pwm_val = 0; blue_pwm_val = 0;
+
+        }
+        else if (cmd == 'L') // Green
+        {
+          color = 1;
+          red_pwm_val = 0; blue_pwm_val = 0;
+
+        }
+        else if (cmd == 'B') // Blue
+        {
+          color = 2;
+          red_pwm_val = 0; green_pwm_val = 0;
+        }
+      }
+
+    }
+
     uint32_t current_tick = HAL_GetTick();
     if (current_tick - last_oled_tick >= 500)
     {
@@ -156,7 +258,7 @@ int main(void)
       last_oled_tick = current_tick;
 
       u8g2_SetFont(&u8g2, u8g2_font_ncenB08_tr);
-      u8g2_DrawStr(&u8g2, 2, 12, "STM32F401CCU6!");
+      u8g2_DrawStr(&u8g2, 2, 12, custom_text);
       u8g2_DrawLine(&u8g2, 0, 15, 128, 15); // Горизонтальна лінія)
       u8g2_DrawLine(&u8g2, 0, 16, 128, 16); // Горизонтальна лінія)
       u8g2_DrawFrame(&u8g2, 0, 0, 128, 64); // Рамка по периметру
@@ -168,18 +270,32 @@ int main(void)
         drawScaledHeart(&u8g2, (128/2) - 7 * heart_scale , 20, heart_scale);
         heart_scale = heart_scale == 2 ? 3 : 2;
       }
+
+
       u8g2_SendBuffer(&u8g2);
     }
 
     if (current_tick - last_led_tick >= 5)
     {
       last_led_tick = current_tick;
-      red_pwm_val += 500;
-      if (red_pwm_val >= 65535)
+      if (color == 0)
       {
-        red_pwm_val = 0;
+        red_pwm_val += 500;
+        if (red_pwm_val >= 65535) red_pwm_val = 0;
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, red_pwm_val); // Канал 1
       }
-      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, red_pwm_val);
+      else if (color == 1)
+      {
+        green_pwm_val += 500;
+        if (green_pwm_val >= 65535) green_pwm_val = 0;
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, green_pwm_val); // КАНАЛ 3!
+      }
+      else if (color == 2)
+      {
+        blue_pwm_val += 500;
+        if (blue_pwm_val >= 65535) blue_pwm_val = 0;
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, blue_pwm_val); // КАНАЛ 4!
+      }
 
     }
 
@@ -428,7 +544,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 9600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -537,6 +653,22 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   {
     HAL_TIM_Base_Stop_IT(&htim4);
     button_locked = 0;
+  }
+}
+
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+  if (huart->Instance == USART1)
+  {
+    last_rx_byte = rx_data[0];
+    last_rx_size = Size;
+
+    // Відправляємо назад (ехо)
+    HAL_UART_Transmit(&huart1, (uint8_t *)rx_data, Size, 100);
+
+    // ПЕРЕЗАПУСКАЄМО ПРИЙОМ ЧЕРЕЗ IT
+    HAL_UARTEx_ReceiveToIdle_IT(&huart1, (uint8_t *)rx_data, 32);
   }
 }
 
