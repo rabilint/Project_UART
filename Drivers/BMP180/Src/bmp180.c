@@ -33,15 +33,113 @@ uint8_t BMP180_Init(BMP180_t *dev, I2C_HandleTypeDef *hi2c, float AtmospherePres
     dev->MC  = (int16_t)((calib[18] << 8) | calib[19]);
     dev->MD  = (int16_t)((calib[20] << 8) | calib[21]);
 
+
+
     return 0;
 }
 
-void BMP180_Read(BMP180_t *dev, uint8_t oss)
+
+void BMP180_Get_Data_Asyc(BMP180_t *dev)
 {
-    uint8_t data[3] = {0};
     uint8_t cmd;
-    int32_t UT, UP, X1, X2, X3, B3, B6, p;
-    uint32_t B4, B7;
+    uint32_t delay;
+    switch (dev->state)
+    {
+        case BMP180_IDLE:
+            break;
+        case BMP180_START_TEMP:
+            cmd = 0x2E;
+            if(HAL_I2C_Mem_Write(dev->hi2c, BMP180_ADDR, 0xF4, 1, &cmd, 1, 10) == HAL_OK) {
+                dev->start_tick = HAL_GetTick();
+                dev->state = BMP180_READ_TEMP; // Чекаємо конверсію
+            }
+            break;
+        case BMP180_PROCESS_TEMP:
+
+            if (HAL_I2C_GetState(dev->hi2c) == HAL_I2C_STATE_READY)
+            {
+                dev->UT = (dev->i2c_buffer[0] << 8) | dev->i2c_buffer[1];
+
+                int32_t X1, X2;
+                X1 = ((dev->UT - (int32_t)dev->AC6) * (int32_t)dev->AC5) / 32768;
+                X2 = ((int32_t)dev->MC * 2048) / (X1 + dev->MD);
+                dev->B5 = X1 + X2;
+                dev->temperature = (dev->B5 + 8) / 160.0f;
+                dev->state = BMP180_START_PRESSURE;
+            }
+            break;
+        case BMP180_READ_TEMP:
+            if (HAL_GetTick() - dev->start_tick >= 5)
+            {
+                if ( HAL_I2C_Mem_Read_DMA(dev->hi2c, BMP180_ADDR, 0xF6, I2C_MEMADD_SIZE_8BIT, dev->i2c_buffer, 2) == HAL_OK)
+                {
+                    dev->state = BMP180_PROCESS_TEMP;
+                }
+            }
+            break;
+        case BMP180_START_PRESSURE:
+            cmd = 0x34 + (dev->current_oss << 6);
+            if(HAL_I2C_Mem_Write(dev->hi2c, BMP180_ADDR, 0xF4, 1, &cmd, 1, 10) == HAL_OK) {
+                dev->start_tick = HAL_GetTick();
+                dev->state = BMP180_READ_PRESSURE;
+            }
+            break;
+        case BMP180_PROCESS_PRESSURE:
+            if (HAL_I2C_GetState(dev->hi2c) == HAL_I2C_STATE_READY)
+            {
+                int32_t X1, X2, X3, B3, B6, p;
+                uint32_t B4, B7;
+                dev->UP = (((uint32_t)dev->i2c_buffer[0] << 16) | ((uint32_t)dev->i2c_buffer[1] << 8) | dev->i2c_buffer[2]) >> (8 - dev->current_oss);
+                B6 = dev->B5 - 4000;
+                X1 = ((int32_t)dev->B2 * ((B6 * B6) / 4096)) / 2048;
+                X2 = ((int32_t)dev->AC2 * B6) / 2048;
+                X3 = X1 + X2;
+                B3 = (((((int32_t)dev->AC1 * 4) + X3) << dev->current_oss) + 2) / 4;
+
+                X1 = ((int32_t)dev->AC3 * B6) / 8192;
+                X2 = ((int32_t)dev->B1 * ((B6 * B6) / 4096)) / 65536;
+                X3 = ((X1 + X2) + 2) / 4;
+                B4 = ((uint32_t)dev->AC4 * (uint32_t)(X3 + 32768)) / 32768;
+
+                B7 = ((uint32_t)dev->UP - (uint32_t)B3) * (50000 >> dev->current_oss);
+                if (B7 < 0x80000000) p = (B7 * 2) / B4;
+                else p = (B7 / B4) * 2;
+
+                X1 = (p / 256) * (p / 256);
+                X1 = (X1 * 3038) / 65536;
+                X2 = (-7357 * p) / 65536;
+                dev->pressure = p + ((X1 + X2 + 3791) / 16);
+                dev->state = BMP180_GET_ALTITUDE;
+            }
+
+            break;
+        case BMP180_READ_PRESSURE:
+            delay = (dev->current_oss == 0) ? 5 : (dev->current_oss == 1) ? 8 : (dev->current_oss == 2) ? 14 : 26;
+            if (HAL_GetTick() - dev->start_tick >= delay) {
+                if (HAL_I2C_Mem_Read_DMA(dev->hi2c, BMP180_ADDR, 0xF6, I2C_MEMADD_SIZE_8BIT, dev->i2c_buffer,3) == HAL_OK)
+                {
+                    dev->state = BMP180_PROCESS_PRESSURE;
+                }
+            }
+            break;
+        case BMP180_GET_ALTITUDE:
+            if (dev->AtmospherePressure > 0)
+            {
+                float pressure_ratio = (float)dev->pressure / (int32_t)dev->AtmospherePressure;
+                dev->Alt = 44330.0f * (1.0f - powf(pressure_ratio, 0.19029495718f));
+            }
+            dev->state = BMP180_DATA_READY;
+            break;
+        case BMP180_DATA_READY:
+            break;
+    }
+}
+
+void BMP180_GetTemp_Blocking(BMP180_t *dev)
+{
+    uint8_t data[2] = {0};
+    uint8_t cmd;
+    int32_t UT,X1, X2;
 
     //Get UT
     cmd = 0x2E;
@@ -55,7 +153,14 @@ void BMP180_Read(BMP180_t *dev, uint8_t oss)
     X2 = ((int32_t)dev->MC * 2048) / (X1 + dev->MD);
     dev->B5 = X1 + X2;
     dev->temperature = (dev->B5 + 8) / 160.0f;
+}
 
+void BMP180_GetPressure_Blocking(BMP180_t *dev, uint8_t oss)
+{
+    uint8_t data[3] = {0};
+    uint8_t cmd;
+    int32_t UP, X1, X2, X3, B3, B6, p;
+    uint32_t B4, B7;
     //Get UP
     cmd = 0x34 + (oss << 6);
     if (HAL_I2C_Mem_Write(dev->hi2c, BMP180_ADDR, 0xF4, I2C_MEMADD_SIZE_8BIT, &cmd, 1, 100) != HAL_OK) return;
@@ -63,7 +168,7 @@ void BMP180_Read(BMP180_t *dev, uint8_t oss)
     uint32_t delays[] = {5, 8, 14, 26};
     HAL_Delay(delays[oss & 0x03] + 2);
 
-    if (HAL_I2C_Mem_Read(dev->hi2c, BMP180_ADDR, 0xF6, I2C_MEMADD_SIZE_8BIT, data, 3, 100) != HAL_OK) return;
+    if (HAL_I2C_Mem_Read(dev->hi2c, BMP180_ADDR, 0xF6, I2C_MEMADD_SIZE_8BIT, data, 3,100) != HAL_OK) return;
     UP = (((uint32_t)data[0] << 16) | ((uint32_t)data[1] << 8) | data[2]) >> (8 - oss);
 
     //Get real pressure
@@ -86,9 +191,21 @@ void BMP180_Read(BMP180_t *dev, uint8_t oss)
     X1 = (X1 * 3038) / 65536;
     X2 = (-7357 * p) / 65536;
     dev->pressure = p + ((X1 + X2 + 3791) / 16);
+}
 
-    if (dev->AtmospherePressure > 0) {
-        float pressure_ratio = (float)dev->pressure / (int32_t)dev->AtmospherePressure;
-        dev->Alt = 44330.0f * (1.0f - powf(pressure_ratio, 0.19029495718f));
+float BMP180_GetAltitude(int32_t pressure, float sea_level_pressure)
+{
+    if (sea_level_pressure > 0)
+    {
+        float pressure_ratio = (float)pressure / (int32_t)sea_level_pressure;
+        return 44330.0f * (1.0f - powf(pressure_ratio, 0.19029495718f));
     }
+    return 0.0f;
+}
+
+void BMP180_Read_Blocking(BMP180_t *dev, uint8_t oss)
+{
+    BMP180_GetTemp_Blocking(dev);
+    BMP180_GetPressure_Blocking(dev, oss);
+    dev->pressure = BMP180_GetAltitude(dev->pressure, dev->AtmospherePressure);
 }

@@ -183,7 +183,7 @@ int main(void)
         }
         else if (cmd == 'G')
         {
-          BMP180_Read(&bmp180,3);
+          BMP180_Read_Blocking(&bmp180,3);
           char buffer[32];
           char error[] = "Error";
           int temp_int = (int)bmp180.temperature;

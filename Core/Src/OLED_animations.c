@@ -36,7 +36,7 @@ void drawScaledHeart(u8g2_t *u8g2, int x, int y, int scale) {
 void drawTP(u8g2_t *u8g2, int x, int y, int x2, int y2, int x3, int y3, BMP180_t *dev)
 {
     if (dev == NULL || dev->hi2c == NULL) return;
-    BMP180_Read(dev, 3);
+    BMP180_Read_Blocking(dev, 3);
     char buffer[32];
     int temp_int = (int)dev->temperature;
     int temp_frac = (int)((dev->temperature - temp_int) * 10);
