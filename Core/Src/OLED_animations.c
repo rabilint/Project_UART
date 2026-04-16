@@ -35,29 +35,31 @@ void drawScaledHeart(u8g2_t *u8g2, int x, int y, int scale) {
 
 void drawTP(u8g2_t *u8g2, int x, int y, int x2, int y2, int x3, int y3, BMP180_t *dev)
 {
-    if (dev == NULL || dev->hi2c == NULL) return;
-    BMP180_Read_Blocking(dev, 3);
+    if (dev == NULL) return;
+
     char buffer[32];
     int temp_int = (int)dev->temperature;
     int temp_frac = (int)((dev->temperature - temp_int) * 10);
+
     int ret = snprintf(buffer, sizeof buffer, "Tmp: %d.%d °C", temp_int, temp_frac);
-    if (ret < 0 || ret >= sizeof buffer)
+    if (ret > 0 && ret < sizeof buffer)
     {
-        return;
+        u8g2_DrawStr(u8g2, x, y, buffer);
     }
 
-    u8g2_DrawStr(u8g2, x, y,  buffer);
-    uint32_t mm_Hg = dev->pressure * 0.00750062;
-    ret = snprintf(buffer, sizeof buffer, "mm Hg: %ld hPa", mm_Hg);
-    if (ret < 0 || ret >= sizeof buffer)
+    uint32_t mm_Hg = (uint32_t)(dev->pressure * 0.00750062f);
+    ret = snprintf(buffer, sizeof buffer, "Press: %lu mmHg", mm_Hg);
+    if (ret > 0 && ret < sizeof buffer)
     {
-        return;
+        u8g2_DrawStr(u8g2, x2, y2, buffer);
     }
-    u8g2_DrawStr(u8g2, x2, y2, buffer);
 
     char alt_buf[20];
     int alt_int = (int)dev->Alt;
     int alt_frac = (int)((dev->Alt - alt_int) * 10);
+
+    if (alt_frac < 0) alt_frac = -alt_frac;
+
     snprintf(alt_buf, sizeof alt_buf, "Alt: %d.%d m", alt_int, alt_frac);
     u8g2_DrawStr(u8g2, x3, y3, alt_buf);
 }

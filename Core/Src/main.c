@@ -46,6 +46,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
+DMA_HandleTypeDef hdma_i2c1_rx;
 
 SPI_HandleTypeDef hspi1;
 
@@ -86,6 +87,7 @@ uint32_t last_led_tick = 0;
 uint32_t red_pwm_val = 0;
 uint32_t green_pwm_val = 0;
 uint32_t blue_pwm_val = 0;
+uint32_t last_bmp_read = 0;
 
 
 uint8_t last_rx_byte = 0;
@@ -183,21 +185,20 @@ int main(void)
         }
         else if (cmd == 'G')
         {
-          BMP180_Read_Blocking(&bmp180,3);
           char buffer[32];
-          char error[] = "Error";
+          char error[] = "Error\n";
           int temp_int = (int)bmp180.temperature;
           int temp_frac = (int)((bmp180.temperature - temp_int) * 10);
-          uint32_t mm_Hg = (uint32_t)(bmp180.pressure * 0.00750062);
+          uint32_t mm_Hg = (uint32_t)(bmp180.pressure * 0.00750063755419211);
 
           int ret = snprintf(buffer, sizeof buffer, "T;%d.%d;P#%lu#\n", temp_int, temp_frac, mm_Hg);
           if (ret < 0 || ret >= sizeof buffer)
           {
-            HAL_UART_Transmit(&huart1, (uint8_t *)error, sizeof error, 100);
+            HAL_UART_Transmit(&huart1, (uint8_t *)error, sizeof(error) - 1, 100);
           }
           else
           {
-            HAL_UART_Transmit(&huart1, (uint8_t *)buffer, sizeof buffer, 100);
+            HAL_UART_Transmit(&huart1, (uint8_t *)buffer, ret, 100);
           }
         }
         else if (cmd == 'C')
@@ -288,15 +289,30 @@ int main(void)
       {
         green_pwm_val += 500;
         if (green_pwm_val >= 65535) green_pwm_val = 0;
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, green_pwm_val); // КАНАЛ 3!
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, green_pwm_val);
       }
       else if (color == 2)
       {
         blue_pwm_val += 500;
         if (blue_pwm_val >= 65535) blue_pwm_val = 0;
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, blue_pwm_val); // КАНАЛ 4!
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, blue_pwm_val);
       }
 
+    }
+
+    //constant sensors data update
+    if (bmp180.state == BMP180_IDLE && (current_tick - last_bmp_read >= 500))
+    {
+      bmp180.current_oss = 3;
+      bmp180.state = BMP180_START_TEMP;
+    }
+
+    BMP180_Get_Data_Asyc(&bmp180);
+
+    if (bmp180.state == BMP180_DATA_READY)
+    {
+      bmp180.state = BMP180_IDLE;
+      last_bmp_read = HAL_GetTick();
     }
 
   }
@@ -569,8 +585,12 @@ static void MX_DMA_Init(void)
 
   /* DMA controller clock enable */
   __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
   /* DMA2_Stream2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);

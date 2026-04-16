@@ -51,7 +51,7 @@ void BMP180_Get_Data_Asyc(BMP180_t *dev)
             cmd = 0x2E;
             if(HAL_I2C_Mem_Write(dev->hi2c, BMP180_ADDR, 0xF4, 1, &cmd, 1, 10) == HAL_OK) {
                 dev->start_tick = HAL_GetTick();
-                dev->state = BMP180_READ_TEMP; // Чекаємо конверсію
+                dev->state = BMP180_READ_TEMP;
             }
             break;
         case BMP180_PROCESS_TEMP:
